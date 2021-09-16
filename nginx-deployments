@@ -1,0 +1,186 @@
+# Deployment:
+
+nginx-deployment.yaml :
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx-app
+  namespace: vlada-ns
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-app
+  template:
+    metadata:
+      labels:
+        app: nginx-app
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+
+# Service: - ClusterIP
+
+nginx-service.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx-service
+  namespace: vlada-ns
+spec:
+  selector:
+    app: nginx-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+
+# NodePort service :
+
+nginx-nodeport-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+ name: myapp-nodeport-service
+ namespace: vlada-ns
+spec:
+    type: NodePort
+    ports:
+     - targetPort: 80
+       port: 80
+       nodePort: 30008
+    selector:
+       app: nginx-app
+       type: front-end
+
+# LoadBalancer :
+
+loadbalancer-service-nginx.yaml 
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadbalancer-service
+  namespace: vlada-ns
+spec:
+  selector:
+    app: nginx-app
+  ports:
+    - port: 80
+      targetPort: 80
+  type: LoadBalancer
+
+# Pristup aplikaciji - nginx :
+
+iten@soc-node1:~/soc-pods/vlada-pods/nginx$ kubectl -n vlada-ns describe services 
+
+Name:                     loadbalancer-service
+Namespace:                vlada-ns
+Labels:                   <none>
+Annotations:              <none>
+Selector:                 app=nginx-app
+Type:                     LoadBalancer
+IP:                       10.110.91.183           pristup:
+LoadBalancer Ingress:     192.168.1.243      ------------------->  192.168.1.243
+Port:                     <unset>  80/TCP
+TargetPort:               80/TCP                  pristup:
+NodePort:                 <unset>  31967/TCP  -------------------> 192.168.1.44:31967
+Endpoints:                172.16.221.100:80,172.16.221.98:80
+Session Affinity:         None
+External Traffic Policy:  Cluster
+Events:
+  Type    Reason        Age                  From             Message
+  ----    ------        ----                 ----             -------
+  Normal  nodeAssigned  2m39s (x6 over 77m)  metallb-speaker  announcing from node "soc-node-4" < ------ 192.168.1.44
+
+
+Name:                     myapp-nodeport-service
+Namespace:                vlada-ns
+Labels:                   <none>
+Annotations:              <none>
+Selector:                 app=nginx-app,type=front-end
+Type:                     NodePort
+IP:                       10.106.43.107
+Port:                     <unset>  80/TCP
+TargetPort:               80/TCP
+NodePort:                 <unset>  30008/TCP
+Endpoints:                <none>
+Session Affinity:         None
+External Traffic Policy:  Cluster
+Events:                   <none>
+
+
+Name:              nginx-service
+Namespace:         vlada-ns
+Labels:            <none>
+Annotations:       <none>
+Selector:          app=nginx-app
+Type:              ClusterIP
+IP:                10.100.0.75
+Port:              <unset>  80/TCP
+TargetPort:        80/TCP
+Endpoints:         172.16.221.100:80,172.16.221.98:80
+Session Affinity:  None
+Events:            <none>
+
+iten@soc-node1:~/soc-pods/vlada-pods/nginx$ ping soc-node-4
+PING soc-node-4.iten.rs (192.168.1.44) 56(84) bytes of data.
+64 bytes from soc-node4 (192.168.1.44): icmp_seq=1 ttl=64 time=0.349 ms
+
+# Ingress: ???
+
+nginx-ingress.yaml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  namespace: vlada-ns
+spec:
+  tls:
+  - hosts:
+      - '*.iten.rs'
+    secretName: tls-iten
+  rules:
+  - host: '*.iten.rs'
+    http:
+      paths:
+      - path: /nginx
+        backend:
+          serviceName: nginx-service
+          servicePort: 80
+
+ten@soc-node1:~/soc-pods/vlada-pods/nginx$ kubectl get ingress --namespace=vlada-ns
+NAME            CLASS    HOSTS       ADDRESS        PORTS     AGE
+nginx-ingress   <none>   *.iten.rs   192.168.1.41   80, 443   66m
+
+iten@soc-node1:~/soc-pods/vlada-pods/nginx$ kubectl -n vlada-ns describe ingress
+Name:             nginx-ingress
+Namespace:        vlada-ns
+Address:          192.168.1.41
+Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
+TLS:
+  tls-iten terminates *.iten.rs
+Rules:
+  Host        Path  Backends
+  ----        ----  --------
+  *.iten.rs   
+              /nginx   nginx-service:80 (172.16.221.100:80,172.16.221.98:80)
+Annotations:  <none>
+Events:
+  Type    Reason  Age   From                      Message
+  ----    ------  ----  ----                      -------
+  Normal  CREATE  58m   nginx-ingress-controller  Ingress vlada-ns/nginx-ingress
+  Normal  UPDATE  57m   nginx-ingress-controller  Ingress vlada-ns/nginx-ingress
+
+
+http://192.168.1.44:31967/  --- pristup NodePort service
